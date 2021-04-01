@@ -1,188 +1,124 @@
-import ClientPacketHandler from 'dimensions/extension/clientpackethandler';
-import Client from 'dimensions/client';
-import Packet from 'dimensions/packet';
-import PacketTypes from 'dimensions/packettypes';
-import PacketWriter from 'dimensions/packets/packetwriter';
-import PacketReader from 'dimensions/packets/packetreader';
-import MCL, { MAX_CLIENT_ID, MOBILE_SERVER_ID, PC_SERVER_ID } from './';
-import BufferReader from 'dimensions/packets/bufferreader';
-import BufferWriter from 'dimensions/packets/bufferwriter';
-
-class PriorClientHandler extends ClientPacketHandler {
-    protected _mcl: MCL;
-
-    constructor(mcl: MCL) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const clientpackethandler_1 = require("dimensions/extension/clientpackethandler");
+const packettypes_1 = require("dimensions/packettypes");
+const packetwriter_1 = require("dimensions/packets/packetwriter");
+const packetreader_1 = require("dimensions/packets/packetreader");
+const bitsbyte_1 = require("dimensions/datatypes/bitsbyte");
+const tileframeimportant_1 = require("./tileframeimportant");
+class PriorClientHandler extends clientpackethandler_1.default {
+    constructor(mcl) {
         super();
         this._mcl = mcl;
     }
-
-    public handlePacket(client: Client, packet: Packet) {
+    handlePacket(client, packet) {
         let handled = false;
         handled = this.handleIncompatiblePacket(client, packet);
         return handled;
     }
-
-    private handleIncompatiblePacket(client: Client, packet: Packet) {
+    handleIncompatiblePacket(client, packet) {
         let handled = false;
-        if (!this._mcl.clients.has(client) && packet.packetType !== PacketTypes.ConnectRequest) {
+        if ((!this._mcl.clients.has(client) && !this._mcl.pcClients.has(client)) && packet.packetType !== packettypes_1.default.ConnectRequest) {
             return false;
         }
-        switch (packet.packetType) {
-            case PacketTypes.ConnectRequest:
-                handled = this.handleConnectRequest(client, packet);
-                break;
-            case PacketTypes.ChatMessage:
-                handled = this.handleChatMessage(client, packet);
-                break;
-            case PacketTypes.PlayerDamage:
-                handled = this.handlePlayerDamage(client, packet);
-                break;
-            case PacketTypes.KillMe:
-                handled = this.handlePlayerKillMe(client, packet);
-                break;
-            case PacketTypes.AddPlayerBuff:
-                handled = this.handleAddPlayerBuff(client, packet);
-                break;
-            case PacketTypes.PlayerZone:
-                handled = this.handlePlayerZone(client, packet);
-                break;
-            case PacketTypes.UpdateItemOwner:
-                this.handleUpdateItemOwner(client, packet);
-                break;
+        else if (this._mcl.pcClients.has(client) && packet.packetType !== packettypes_1.default.ConnectRequest) {
+            switch (packet.packetType) {
+                case packettypes_1.default.SendTileSquare:
+                    handled = this.handleSendTileSquare(client, packet);
+                    break;
+
+            }
+        }
+        else {
+            switch (packet.packetType) {
+                case packettypes_1.default.ConnectRequest:
+                    handled = this.handleConnectRequest(client, packet);
+                    break;
+            }
         }
         return handled;
     }
-
-    private handleUpdateItemOwner(client, packet) {
-        const reader = new PacketReader(packet.data);
-        const itemId = reader.readInt16();
-        const owner = reader.readByte();
-
-        if (owner === MOBILE_SERVER_ID) {
-            packet.data.writeUInt8(PC_SERVER_ID, 2);
-        }
-    }
-
-    private handleConnectRequest(client: Client, packet: Packet) {
-        let reader = new PacketReader(packet.data);
+    handleConnectRequest(client, packet) {
+        let reader = new packetreader_1.default(packet.data);
         let version = reader.readString();
-        // Mobile Version
-        if (version === "Terraria155" || version === "Terraria156") {
+        if (version === "Terraria230") {
             this._mcl.clients.add(client);
-            packet.data = new PacketWriter()
-                .setType(PacketTypes.ConnectRequest)
-                .packString("Terraria194")
+            packet.data = new packetwriter_1.default()
+                .setType(packettypes_1.default.ConnectRequest)
+                .packString("Terraria233")
+                .data;
+            return false;
+        }
+        else if (version === "Terraria235" || version === "Terraria236") {
+            this._mcl.pcClients.add(client);
+            packet.data = new packetwriter_1.default()
+                .setType(packettypes_1.default.ConnectRequest)
+                .packString("Terraria233")
                 .data;
             return false;
         }
         return false;
     }
-
-    private handleChatMessage(client: Client, packet: Packet) {
-        let reader = new PacketReader(packet.data);
-        reader.readByte();
-        reader.readByte();
-        reader.readByte();
-        reader.readByte();
-        let message = reader.readString();
-        packet.packetType = PacketTypes.LoadNetModule;
-        packet.data = new PacketWriter()
-            .setType(PacketTypes.LoadNetModule)
-            .packUInt16(1)
-            .packString("Say")
-            .packString(message)
-            .data;
-        return false;
-    }
-
-    private handlePlayerDamage(client: Client, packet: Packet) {
-        const reader = new PacketReader(packet.data);
-        let playerId = reader.readByte();
-        const hitDirection = reader.readByte();
-        const damage = reader.readInt16();
-        const message = reader.readString();
-        const flags = reader.readByte();
-        const realId = this._mcl.realId.get(client);
-        if (playerId === MAX_CLIENT_ID && typeof realId !== "undefined") {
-            playerId = realId;
+    /**
+     * Handles client => server STS so pc clients send the properly formatted data
+     * @param client the client the packet came from
+     * @param packet the packet and it's data
+     * @returns whether or not the packet was handled
+     */
+    handleSendTileSquare(client, packet) {
+        const reader = new packetreader_1.default(packet.data);
+        const packetWriter = new packetwriter_1.default();
+        const tileX = reader.readInt16();
+        const tileY = reader.readInt16();
+        const width = reader.readByte();
+        const length = reader.readByte();
+        const changeByte = reader.readByte();
+        const size = Math.max(width, length);
+        packetWriter.setType(20)
+            .packUInt16(size);
+        if (((size & 32767) & 32768) > 0) {
+            packetWriter.packByte(changeByte);
         }
-
-        packet.data = new PacketWriter()
-            .setType(PacketTypes.PlayerHurtV2)
-            .packByte(playerId)
-            .packByte(128)
-            .packString(message)
-            .packInt16(damage)
-            .packByte(hitDirection)
-            .packByte(flags)
-            .packSByte(0)
-            .data;
-
-        return false;
-    }
-
-    private handlePlayerKillMe(client: Client, packet: Packet) {
-        const reader = new PacketReader(packet.data);
-        let playerId = reader.readByte();
-        const hitDirection = reader.readByte();
-        const damage = reader.readInt16();
-        const message = reader.readString();
-        const flags = reader.readByte();
-        const realId = this._mcl.realId.get(client);
-        if (playerId === MAX_CLIENT_ID && typeof realId !== "undefined") {
-            playerId = realId;
+        packetWriter.packInt16(tileX)
+            .packInt16(tileY);
+        let bitsByte = 0;
+        let bitsByte2 = 0;
+        for (let i = tileX; i < tileX + size; i++) {
+            for (let j = tileY; j < tileY + size; j++) {
+                const value = reader.readByte();
+                const value2 = reader.readByte();
+                bitsByte = new bitsbyte_1.default(value);
+                bitsByte2 = new bitsbyte_1.default(value2);
+                packetWriter.packByte(value)
+                    .packByte(value2);
+                if (bitsByte2[2]) {
+                    packetWriter.packByte(reader.readByte()); // tile.Color
+                }
+                if (bitsByte2[3]) {
+                    packetWriter.packByte(reader.readByte()); // tile.wallColor
+                }
+                // tile.active()
+                if (bitsByte[0]) {
+                    const tileType = reader.readInt16();
+                    packetWriter.packInt16(tileType);
+                    if (tileframeimportant_1.default[tileType]) {
+                        packetWriter.packInt16(reader.readInt16()) // tile.frameX
+                            .packInt16(reader.readInt16()); // tile.frameY
+                    }
+                }
+                // tile.wall()
+                if (bitsByte[2]) {
+                    packetWriter.packUInt16(reader.readUInt16()); // wall type
+                }
+                // checks if tile is a liquid?
+                if (bitsByte[3]) {
+                    packetWriter.packByte(reader.readByte()) //tile.liquid
+                        .packByte(reader.readByte()); //tile.liquidType
+                }
+            }
         }
-
-        packet.data = new PacketWriter()
-            .setType(PacketTypes.PlayerDeathV2)
-            .packByte(playerId)
-            .packByte(128)
-            .packString(message)
-            .packInt16(damage)
-            .packByte(hitDirection)
-            .packByte(flags)
-            .data;
-
-        return false;
-    }
-
-    private handleAddPlayerBuff(client: Client, packet: Packet) {
-        const reader = new PacketReader(packet.data);
-        let playerId = reader.readByte();
-        const buff = reader.readByte();
-        const time = reader.readInt16();
-        const realId = this._mcl.realId.get(client);
-        if (playerId === MAX_CLIENT_ID && typeof realId !== "undefined") {
-            playerId = realId;
-        }
-
-        packet.data = new PacketWriter()
-            .setType(PacketTypes.AddPlayerBuff)
-            .packByte(playerId)
-            .packByte(buff)
-            .packInt32(time)
-            .data;
-
-        return false;
-    }
-
-    private handlePlayerZone(client: Client, packet: Packet) {
-        const reader = new PacketReader(packet.data);
-        const playerId = reader.readByte();
-        const zone1 = reader.readByte();
-        const zone2 = reader.readByte();
-
-        packet.data = new PacketWriter()
-            .setType(PacketTypes.PlayerZone)
-            .packByte(playerId)
-            .packByte(zone1)
-            .packByte(zone2)
-            .packByte(0)
-            .packByte(0)
-            .data;
-
+        packet.data = packetWriter.data;
         return false;
     }
 }
-
-export default PriorClientHandler;
+exports.default = PriorClientHandler;

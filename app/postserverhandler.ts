@@ -80,7 +80,7 @@ class PriorClientHandler extends ClientPacketHandler {
         }
         return false;
     }
-    handleSendTileSquare(client, packet) {
+    private handleSendTileSquare(client, packet) {
         const reader = new PacketReader(packet.data);
         const tileX = reader.readInt16();
         const tileY = reader.readInt16();
